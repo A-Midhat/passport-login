@@ -1,91 +1,116 @@
+/**
+* This code sets up an Express.js server with authentication functionality using Passport.js.
+* It connects to a MongoDB database, defines a user schema, and sets up routes for login, registration, and accessing a "secrets" page.
+* The server listens on port 3000 and logs a message when it starts.
+*/
 require('dotenv').config();
 const express = require("express");
+const session = require("express-session");
+const passport = require("passport");
+const passportLocalMongoose = require("passport-local-mongoose");
+const mongoose = require("mongoose");
 const ejs = require("ejs");
 const bodyParser = require("body-parser");
-const mongoose = require("mongoose");
-const bcrypt = require("bcrypt");
 
-const rounds = 10;
-
-//const md5 = require("md5");
-// const encrypt = require("mongoose-encryption");
 
 const app = express();
 
+app.set("view engine", "ejs");
+app.use(bodyParser.urlencoded({ extended: true }));
+app.use(express.static("public"));
+
+app.use(session({
+secret: "Our little secret.",
+resave: false,
+saveUninitialized: true
+}));
+
+app.use(passport.initialize());
+app.use(passport.session());
+
 mongoose.connect("mongodb://localhost:27017/userDB");
-app.set("view engine", "ejs");  
-app.use(bodyParser.urlencoded({ extended: true })); 
 
 const userSchema = new mongoose.Schema({
-    email : String,
-    password: String
+email: String,
+password: String
 });
-// const secret = process.env.SECRET;
-// userSchema.plugin(encrypt,{secret:secret, encryptedFields: ["password"]});
+
+userSchema.plugin(passportLocalMongoose);
 
 const User = new mongoose.model("User", userSchema);
 
+passport.use(User.createStrategy());
+
+passport.serializeUser(User.serializeUser());
+passport.deserializeUser(User.deserializeUser());
+
+
 app.get("/", (req, res) => {
-  res.render("home");
+res.render("home");
+});
+
+app.route("/login")
+.get((req, res) => {
+res.render("login");
+})
+.post((req, res) => {
+const user = new User({
+username: req.body.username,
+password: req.body.password
+});
+req.login(user, (err) => {
+if (err) {
+console.error(err);
+}
+else {
+passport.authenticate("local")(req, res, () => {
+res.redirect("/secrets");
+});
+}
+});
+});
+
+app.route("/register")
+.get((req, res) => {
+res.render("register");
+})
+.post((req, res) => {
+User.register({ username: req.body.username }, req.body.password, (err, user) => {
+if (err) {
+console.error(err);
+res.redirect("/register");
+}
+else {
+passport.authenticate("local")(req, res, () => {
+res.redirect("/secrets");
+})
+}
+})
 });
 
 
- app.route("/login")
-    .get((req, res) => {
-        res.render("login");
-    })
-    .post(async(req,res)=>{
-        const user = await User.findOne({email:req.body.username});
-        if(user){
-            /*
-            if(user.password === req.body.password){ //compare hash values of user password
-                console.log("Welcome user!");
-                res.render("secrets");
-            } else {
-                console.log("Invalid password. Please try again.");
-                res.render("login")
-            }*/
-            bcrypt.compare(req.body.password, user.password, function(err,response){
-                if(response){
-                    console.log("Welcome user!");
-                    res.render("secrets");
-                } else {
-                    console.log("Invalid password. Please try again.");
-                    res.render("login");
-                }
-            });
-            }
-        
-        else {
-            console.log("No user found with the provided email.");
-            res.render("login");
-        }
-    
-    });
-
-app.route("/register")
-    .get((req, res) => {
-    
-        res.render("register");
-  })
-    .post((req,res)=>{
-        const userEmail = req.body.username;
-        const userPassword = req.body.password;
-        bcrypt.hash(userPassword, rounds,async function(err, hash){
-            const newUser = new User({
-                email: userEmail,
-                password: hash // hash the password and save h
-            });
-            console.log("before hash function=>:" ,req.body.password,"after hash function=>:" ,hash);
-            await newUser.save();
-            console.log("New user registered!");
-            res.render("secrets");
-    
-        })
-        
-    })
-
-
+app.route("/secrets")
+.get((req, res) => {
+if (req.isAuthenticated()) {
+console.log("Authenticated User");
+res.render("secrets");
+}
+else {
+console.log("Not Authenticated User");
+res.redirect("/login");
+}
+})
+app.route("/logout")
+.get((req, res) => {
+req.logout((err) => {
+if (err) {
+console.error(err);
+}
+else {
+res.redirect("/");
+}
+});
+})
 app.listen(3000, () => {
-  console.log("Server started on port 3000");
+console.log("Server started on port 3000");
 });
